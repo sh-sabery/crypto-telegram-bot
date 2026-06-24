@@ -15,17 +15,11 @@ class CommandHandler {
     const welcomeText = `
 🔄 *به ربات تبادل ارز دیجیتال خوش آمدید*
 
-این ربات از سرویس FixedFloat استفاده می‌کند.
-
 *دستورات موجود:*
 /currencies - لیست ارزهای موجود
 /exchange - شروع مبادله
 /myorders - سفارشات من
 /help - راهنما
-
-⚠️ *توجه مهم:*
-با ایجاد سفارش، شما با قوانین سرویس FixedFloat موافقت می‌کنید.
-سرویس تبادل توسط FixedFloat ارائه می‌شود.
     `;
 
     await this.bot.sendMessage(userId, welcomeText, { parse_mode: 'Markdown' });
