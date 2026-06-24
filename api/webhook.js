@@ -1,91 +1,119 @@
+require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const FixedFloatAPI = require('../src/services/fixedfloat');
 const CommandHandler = require('../src/handlers/commands');
 const ExchangeHandler = require('../src/handlers/exchange');
 
-// Instance های global (برای حفظ session ها)
+// Global instances
 let bot;
 let fixedFloat;
 let commandHandler;
 let exchangeHandler;
 
-// Initialize
 function initialize() {
-  if (!bot) {
-    bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN);
-    fixedFloat = new FixedFloatAPI(
-      process.env.FIXEDFLOAT_API_KEY,
-      process.env.FIXEDFLOAT_API_SECRET,
-      process.env.FIXEDFLOAT_REF_CODE
-    );
-    commandHandler = new CommandHandler(bot, fixedFloat);
-    exchangeHandler = new ExchangeHandler(bot, fixedFloat);
-  }
+  if (bot) return;
+
+  bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN);
+
+  fixedFloat = new FixedFloatAPI(
+    process.env.FIXEDFLOAT_API_KEY,
+    process.env.FIXEDFLOAT_API_SECRET,
+    process.env.FIXEDFLOAT_REF_CODE
+  );
+
+  commandHandler = new CommandHandler(bot, fixedFloat);
+  exchangeHandler = new ExchangeHandler(bot, fixedFloat);
 }
 
-// Handler function
 async function handleUpdate(update) {
   try {
     if (update.message) {
       const msg = update.message;
-      
-      // Commands
-      if (msg.text) {
-        if (msg.text === '/start') {
-          await commandHandler.handleStart(msg);
-        } else if (msg.text === '/currencies') {
-          await commandHandler.handleCurrencies(msg);
-        } else if (msg.text === '/myorders') {
-          await commandHandler.handleMyOrders(msg);
-        } else if (msg.text === '/help') {
-          await commandHandler.handleHelp(msg);
-        } else if (msg.text === '/exchange') {
-          await exchangeHandler.startExchange(msg);
-        } else if (msg.text.startsWith('/check_')) {
-          const orderId = msg.text.substring(7);
-          await exchangeHandler.checkOrder(msg, orderId);
-        } else {
-          // Text message (برای فرآیند مبادله)
-          const userId = msg.from.id;
-          const session = exchangeHandler.sessions.get(userId);
+      const text = msg.text || '';
 
-          if (session) {
-            if (session.step === 'enter_amount') {
-              await exchangeHandler.handleAmount(msg);
-            } else if (session.step === 'enter_address') {
-              await exchangeHandler.handleAddress(msg);
-            } else if (session.step === 'enter_tag') {
-              await exchangeHandler.handleTag(msg);
-            }
-          }
+      // Commands
+      if (text === '/start') {
+        return await commandHandler.handleStart(msg);
+      }
+      if (text === '/currencies') {
+        return await commandHandler.handleCurrencies(msg);
+      }
+      if (text === '/myorders') {
+        return await commandHandler.handleMyOrders(msg);
+      }
+      if (text === '/help') {
+        return await commandHandler.handleHelp(msg);
+      }
+      if (text === '/exchange') {
+        return await exchangeHandler.startExchange(msg);
+      }
+      if (text.startsWith('/check_')) {
+        const orderId = text.split('_')[1];
+        return await exchangeHandler.checkOrder(msg, orderId);
+      }
+
+      // Exchange flow messages
+      const userId = msg.from.id;
+      const session = exchangeHandler.sessions.get(userId);
+
+      if (session) {
+        if (session.step === 'awaiting_amount') {
+          return await exchangeHandler.handleAmount(msg);
+        }
+        if (session.step === 'awaiting_address') {
+          return await exchangeHandler.handleAddress(msg);
+        }
+        if (session.step === 'awaiting_tag') {
+          return await exchangeHandler.handleTag(msg);
         }
       }
-    } else if (update.callback_query) {
-      await exchangeHandler.handleCallback(update.callback_query);
+    }
+
+    if (update.callback_query) {
+      const query = update.callback_query;
+      const data = query.data;
+
+      // دکمه‌های منوی اصلی
+      if (data === 'start_exchange') {
+        await bot.answerCallbackQuery(query.id);
+        return await exchangeHandler.startExchange(query.message);
+      }
+      if (data === 'show_currencies') {
+        await bot.answerCallbackQuery(query.id);
+        return await commandHandler.handleCurrencies(query.message);
+      }
+      if (data === 'my_orders') {
+        await bot.answerCallbackQuery(query.id);
+        return await commandHandler.handleMyOrders(query.message);
+      }
+      if (data === 'show_help') {
+        await bot.answerCallbackQuery(query.id);
+        return await commandHandler.handleHelp(query.message);
+      }
+      if (data === 'back_to_menu') {
+        await bot.answerCallbackQuery(query.id);
+        return await commandHandler.handleStart(query.message);
+      }
+
+      // Exchange callbacks
+      return await exchangeHandler.handleCallback(query);
     }
   } catch (error) {
     console.error('Error handling update:', error);
   }
 }
 
-// Vercel serverless function
 module.exports = async (req, res) => {
+  if (req.method !== 'POST') {
+    return res.status(200).send('OK');
+  }
+
   try {
-    // فقط POST requests
-    if (req.method !== 'POST') {
-      return res.status(405).json({ error: 'Method not allowed' });
-    }
-
-    // Initialize bot
     initialize();
-
-    // Process update
     await handleUpdate(req.body);
-
-    // پاسخ سریع به تلگرام
-    res.status(200).json({ ok: true });
+    res.status(200).send('OK');
   } catch (error) {
     console.error('Webhook error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).send('Error');
   }
 };

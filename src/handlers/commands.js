@@ -1,142 +1,213 @@
 const userStore = require('../database/userStore');
 
 class CommandHandler {
-  constructor(bot, fixedFloat) {
+  constructor(bot, fixedFloatAPI) {
     this.bot = bot;
-    this.api = fixedFloat;
+    this.api = fixedFloatAPI;
   }
 
   async handleStart(msg) {
-    const userId = msg.from.id;
-    
-    // ذخیره اطلاعات کاربر
-    userStore.saveUser(userId, msg.from);
+    const chatId = msg.chat.id;
+    const user = msg.from;
 
-    const welcomeText = `
-🔄 *به ربات تبادل ارز دیجیتال خوش آمدید*
+    // ذخیره اطلاعات کاربر برای compliance
+    userStore.saveUser({
+      user_id: user.id,
+      username: user.username || 'N/A',
+      language: user.language_code || 'fa'
+    });
 
-*دستورات موجود:*
-/currencies - لیست ارزهای موجود
-/exchange - شروع مبادله
-/myorders - سفارشات من
-/help - راهنما
-    `;
+    const welcomeMessage = `🎉 خوش آمدید به ربات تبادل ارز دیجیتال!
 
-    await this.bot.sendMessage(userId, welcomeText, { parse_mode: 'Markdown' });
+این ربات به شما امکان می‌دهد به راحتی ارزهای دیجیتال خود را تبادل کنید.
+
+🔹 برای شروع تبادل، دکمه زیر را بزنید:`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '💱 شروع تبادل', callback_data: 'start_exchange' }
+        ],
+        [
+          { text: '💰 ارزهای موجود', callback_data: 'show_currencies' },
+          { text: '📋 سفارش‌های من', callback_data: 'my_orders' }
+        ],
+        [
+          { text: '❓ راهنما', callback_data: 'show_help' }
+        ]
+      ]
+    };
+
+    await this.bot.sendMessage(chatId, welcomeMessage, {
+      parse_mode: 'Markdown',
+      reply_markup: keyboard
+    });
   }
 
   async handleCurrencies(msg) {
-    const userId = msg.from.id;
-    
+    const chatId = msg.chat.id;
+
     try {
-      await this.bot.sendMessage(userId, '⏳ در حال دریافت لیست ارزها...');
-      
+      await this.bot.sendMessage(chatId, '⏳ در حال دریافت لیست ارزها...');
+
       const currencies = await this.api.getCurrencies();
-      
-      // دسته‌بندی بر اساس شبکه
-      const networks = {};
-      currencies.forEach(currency => {
-        if (!networks[currency.network]) {
-          networks[currency.network] = [];
-        }
-        networks[currency.network].push(currency);
-      });
 
-      let responseText = '*💰 ارزهای موجود:*\n\n';
-      
-      Object.keys(networks).sort().forEach(network => {
-        responseText += `*${network}:*\n`;
-        networks[network].forEach(c => {
-          const recvIcon = c.recv ? '✅' : '❌';
-          const sendIcon = c.send ? '✅' : '❌';
-          responseText += `  • ${c.code} - ${c.name} (دریافت: ${recvIcon} | ارسال: ${sendIcon})\n`;
-        });
-        responseText += '\n';
-      });
-
-      // تقسیم پیام به چند بخش (محدودیت تلگرام)
-      const chunks = this.splitMessage(responseText, 4000);
-      for (const chunk of chunks) {
-        await this.bot.sendMessage(userId, chunk, { parse_mode: 'Markdown' });
+      if (!currencies || currencies.length === 0) {
+        return await this.bot.sendMessage(chatId, '❌ خطا در دریافت لیست ارزها. لطفاً بعداً تلاش کنید.');
       }
+
+      // گروه‌بندی بر اساس شبکه
+      const networks = {};
+      currencies.forEach(ccy => {
+        const net = ccy.network || 'OTHER';
+        if (!networks[net]) networks[net] = [];
+        networks[net].push(ccy);
+      });
+
+      let message = '💰 *ارزهای دیجیتال موجود:*\n\n';
+
+      for (const [network, ccies] of Object.entries(networks)) {
+        message += `📡 *${network}*\n`;
+        ccies.forEach(c => {
+          const sendIcon = c.send ? '✅' : '❌';
+          const recvIcon = c.recv ? '✅' : '❌';
+          message += `  • ${c.code.toUpperCase()} - ${c.name}\n`;
+          message += `    ارسال: ${sendIcon} | دریافت: ${recvIcon}\n`;
+        });
+        message += '\n';
+      }
+
+      const messages = this.splitMessage(message);
+      
+      for (const msg of messages) {
+        await this.bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
+      }
+
+      // دکمه بازگشت
+      const keyboard = {
+        inline_keyboard: [
+          [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_to_menu' }]
+        ]
+      };
+
+      await this.bot.sendMessage(chatId, '🔹 برای بازگشت:', { reply_markup: keyboard });
+
     } catch (error) {
-      await this.bot.sendMessage(userId, '❌ خطا در دریافت لیست ارزها: ' + error.message);
+      console.error('Error fetching currencies:', error);
+      await this.bot.sendMessage(chatId, '❌ خطا در دریافت اطلاعات. لطفاً دوباره تلاش کنید.');
     }
   }
 
   async handleMyOrders(msg) {
+    const chatId = msg.chat.id;
     const userId = msg.from.id;
-    const orders = userStore.getUserOrders(userId);
 
-    if (orders.length === 0) {
-      await this.bot.sendMessage(userId, 'شما هنوز هیچ سفارشی ندارید.\n\n/exchange برای شروع مبادله');
-      return;
+    try {
+      const orders = userStore.getUserOrders(userId);
+
+      if (!orders || orders.length === 0) {
+        const keyboard = {
+          inline_keyboard: [
+            [{ text: '💱 ایجاد اولین سفارش', callback_data: 'start_exchange' }],
+            [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_to_menu' }]
+          ]
+        };
+
+        return await this.bot.sendMessage(
+          chatId,
+          '📋 شما هنوز سفارشی ثبت نکرده‌اید.',
+          { reply_markup: keyboard }
+        );
+      }
+
+      let message = '📋 *سفارش‌های شما:*\n\n';
+
+      orders.forEach(order => {
+        const statusEmoji = this.getStatusEmoji(order.status);
+        const statusText = this.translateStatus(order.status);
+
+        message += `${statusEmoji} *سفارش ${order.id}*\n`;
+        message += `   ${order.fromAmount} ${order.fromCcy.toUpperCase()} → ${order.toAmount} ${order.toCcy.toUpperCase()}\n`;
+        message += `   وضعیت: ${statusText}\n`;
+        message += `   /check_${order.id}\n\n`;
+      });
+
+      const keyboard = {
+        inline_keyboard: [
+          [{ text: '💱 سفارش جدید', callback_data: 'start_exchange' }],
+          [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_to_menu' }]
+        ]
+      };
+
+      await this.bot.sendMessage(chatId, message, {
+        parse_mode: 'Markdown',
+        reply_markup: keyboard
+      });
+
+    } catch (error) {
+      console.error('Error fetching orders:', error);
+      await this.bot.sendMessage(chatId, '❌ خطا در دریافت سفارش‌ها.');
     }
-
-    let text = '*📋 سفارشات شما:*\n\n';
-    
-    orders.slice(-10).reverse().forEach(order => {
-      const statusEmoji = this.getStatusEmoji(order.status);
-      text += `${statusEmoji} *${order.id}*\n`;
-      text += `  ${order.from.amount} ${order.from.code} → ${order.to.amount} ${order.to.code}\n`;
-      text += `  وضعیت: ${this.translateStatus(order.status)}\n`;
-      text += `  /check_${order.id}\n\n`;
-    });
-
-    await this.bot.sendMessage(userId, text, { parse_mode: 'Markdown' });
   }
 
   async handleHelp(msg) {
-    const userId = msg.from.id;
-    
-    const helpText = `
-📖 *راهنمای استفاده:*
+    const chatId = msg.chat.id;
 
-*1️⃣ مشاهده ارزها:*
-از دستور /currencies برای مشاهده لیست کامل ارزهای پشتیبانی شده استفاده کنید.
+    const helpMessage = `📖 *راهنمای استفاده از ربات*
 
-*2️⃣ شروع مبادله:*
-- دستور /exchange را وارد کنید
-- ارز مبدا را انتخاب کنید
-- ارز مقصد را انتخاب کنید
-- مقدار را وارد کنید
-- آدرس دریافت را وارد کنید
+🔹 *دستورات موجود:*
 
-*3️⃣ پیگیری سفارش:*
-از دستور /myorders برای مشاهده سفارشات خود استفاده کنید.
+/start - نمایش منوی اصلی
+/exchange - شروع فرآیند تبادل ارز
+/currencies - مشاهده لیست ارزهای موجود
+/myorders - مشاهده سفارش‌های ثبت شده
+/help - نمایش این راهنما
 
-*⚠️ نکات مهم:*
-- حداقل و حداکثر مبلغ را رعایت کنید
-- آدرس ولت را دقیق وارد کنید
-- برای برخی ارزها (XRP, XLM) نیاز به Memo/Tag است
+🔹 *نحوه استفاده:*
 
-*🔒 امنیت:*
-ربات هیچ دسترسی به کیف پول شما ندارد.
+1️⃣ با دستور /exchange فرآیند تبادل را شروع کنید
+2️⃣ ارز مبدا و مقصد را انتخاب کنید
+3️⃣ نوع سفارش (Fixed یا Float) را انتخاب کنید
+4️⃣ مقدار و آدرس مقصد را وارد کنید
+5️⃣ سفارش خود را تأیید کنید
+6️⃣ ارز را به آدرس نمایش داده شده ارسال کنید
 
-    `;
+⚠️ *نکات مهم:*
+• برای هر سفارش محدودیت زمانی وجود دارد
+• وضعیت سفارش خود را با /check_ORDERID بررسی کنید`;
 
-    await this.bot.sendMessage(userId, helpText, { parse_mode: 'Markdown' });
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '💱 شروع تبادل', callback_data: 'start_exchange' }],
+        [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_to_menu' }]
+      ]
+    };
+
+    await this.bot.sendMessage(chatId, helpMessage, {
+      parse_mode: 'Markdown',
+      reply_markup: keyboard
+    });
   }
 
   getStatusEmoji(status) {
-    const emojis = {
+    const statusMap = {
       'NEW': '🆕',
       'PENDING': '⏳',
       'EXCHANGE': '🔄',
-      'WITHDRAW': '📤',
+      'WITHDRAW': '💸',
       'DONE': '✅',
       'EXPIRED': '⏰',
-      'EMERGENCY': '⚠️'
+      'EMERGENCY': '🚨'
     };
-    return emojis[status] || '❓';
+    return statusMap[status] || '❓';
   }
 
   translateStatus(status) {
     const translations = {
       'NEW': 'جدید - در انتظار واریز',
-      'PENDING': 'در انتظار تایید',
-      'EXCHANGE': 'در حال مبادله',
-      'WITHDRAW': 'در حال ارسال',
+      'PENDING': 'در حال بررسی',
+      'EXCHANGE': 'در حال تبادل',
+      'WITHDRAW': 'در حال واریز',
       'DONE': 'تکمیل شده',
       'EXPIRED': 'منقضی شده',
       'EMERGENCY': 'نیاز به اقدام'
@@ -144,24 +215,24 @@ class CommandHandler {
     return translations[status] || status;
   }
 
-  splitMessage(text, maxLength) {
-    const chunks = [];
-    let currentChunk = '';
-    
-    text.split('\n').forEach(line => {
-      if ((currentChunk + line + '\n').length > maxLength) {
-        chunks.push(currentChunk);
-        currentChunk = line + '\n';
+  splitMessage(text, maxLength = 4000) {
+    const messages = [];
+    let current = '';
+
+    const lines = text.split('\n');
+
+    for (const line of lines) {
+      if ((current + line + '\n').length > maxLength) {
+        messages.push(current);
+        current = line + '\n';
       } else {
-        currentChunk += line + '\n';
+        current += line + '\n';
       }
-    });
-    
-    if (currentChunk) {
-      chunks.push(currentChunk);
     }
-    
-    return chunks;
+
+    if (current) messages.push(current);
+
+    return messages;
   }
 }
 
