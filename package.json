@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node src/index.js",
     "setup-webhook": "node scripts/setup-webhook.js",
+    "setup-menu": "node src/setupMenu.js",
     "test": "echo \"No tests yet\""
   },
   "keywords": ["telegram", "bot", "crypto", "exchange", "fixedfloat"],
@@ -17,3 +18,4 @@
     "dotenv": "^16.3.1"
   }
 }
+
