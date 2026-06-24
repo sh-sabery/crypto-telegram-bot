@@ -11,7 +11,7 @@ if (!process.env.TELEGRAM_BOT_TOKEN) {
 }
 
 if (!process.env.FIXEDFLOAT_API_KEY || !process.env.FIXEDFLOAT_API_SECRET) {
-  console.error('❌ کلیدهای API FixedFloat تنظیم نشده‌اند!');
+  console.error('❌ کلیدهای FixedFloat API تنظیم نشده‌اند!');
   process.exit(1);
 }
 
@@ -42,31 +42,38 @@ bot.onText(/\/check_(.+)/, (msg, match) => {
 // Callback query handler برای دکمه‌های شیشه‌ای
 bot.on('callback_query', async (query) => {
   const data = query.data;
+  const chatId = query.message.chat.id;
 
   // دکمه‌های منوی اصلی
   if (data === 'start_exchange') {
     await bot.answerCallbackQuery(query.id);
-    return exchangeHandler.startExchange(query.message);
+    // ساخت یک message object با chat id درست
+    const fakeMsg = { chat: { id: chatId }, from: query.from };
+    return exchangeHandler.startExchange(fakeMsg);
   }
 
   if (data === 'show_currencies') {
     await bot.answerCallbackQuery(query.id);
-    return commandHandler.handleCurrencies(query.message);
+    const fakeMsg = { chat: { id: chatId }, from: query.from };
+    return commandHandler.handleCurrencies(fakeMsg);
   }
 
   if (data === 'my_orders') {
     await bot.answerCallbackQuery(query.id);
-    return commandHandler.handleMyOrders(query.message);
+    const fakeMsg = { chat: { id: chatId }, from: query.from };
+    return commandHandler.handleMyOrders(fakeMsg);
   }
 
   if (data === 'show_help') {
     await bot.answerCallbackQuery(query.id);
-    return commandHandler.handleHelp(query.message);
+    const fakeMsg = { chat: { id: chatId }, from: query.from };
+    return commandHandler.handleHelp(fakeMsg);
   }
 
   if (data === 'back_to_menu') {
     await bot.answerCallbackQuery(query.id);
-    return commandHandler.handleStart(query.message);
+    const fakeMsg = { chat: { id: chatId }, from: query.from };
+    return commandHandler.handleStart(fakeMsg);
   }
 
   // سایر callbackها برای exchange flow
