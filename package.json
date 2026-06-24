@@ -1,10 +1,11 @@
 {
-  "name": "fixedfloat-telegram-bot",
+  "name": "crypto-telegram-bot",
   "version": "1.0.0",
   "description": "Telegram bot for cryptocurrency exchange using FixedFloat API",
   "main": "api/webhook.js",
   "scripts": {
     "dev": "node src/index.js",
+    "setup-webhook": "node scripts/setup-webhook.js",
     "test": "echo \"No tests yet\""
   },
   "keywords": ["telegram", "bot", "crypto", "exchange", "fixedfloat"],
