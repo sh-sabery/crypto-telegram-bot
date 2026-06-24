@@ -4,116 +4,100 @@ const FixedFloatAPI = require('../src/services/fixedfloat');
 const CommandHandler = require('../src/handlers/commands');
 const ExchangeHandler = require('../src/handlers/exchange');
 
-// Global instances
-let bot;
-let fixedFloat;
-let commandHandler;
-let exchangeHandler;
+let bot, fixedFloat, commandHandler, exchangeHandler;
 
 function initialize() {
-  if (bot) return;
+  if (!bot) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const apiKey = process.env.FIXEDFLOAT_API_KEY;
+    const apiSecret = process.env.FIXEDFLOAT_API_SECRET;
 
-  bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN);
+    if (!token || !apiKey || !apiSecret) {
+      throw new Error('Missing required environment variables');
+    }
 
-  fixedFloat = new FixedFloatAPI(
-    process.env.FIXEDFLOAT_API_KEY,
-    process.env.FIXEDFLOAT_API_SECRET,
-    process.env.FIXEDFLOAT_REF_CODE
-  );
-
-  commandHandler = new CommandHandler(bot, fixedFloat);
-  exchangeHandler = new ExchangeHandler(bot, fixedFloat);
+    bot = new TelegramBot(token);
+    fixedFloat = new FixedFloatAPI(apiKey, apiSecret);
+    commandHandler = new CommandHandler(bot, fixedFloat);
+    exchangeHandler = new ExchangeHandler(bot, fixedFloat);
+  }
+  return { bot, commandHandler, exchangeHandler };
 }
 
 async function handleUpdate(update) {
-  try {
-    if (update.message) {
-      const msg = update.message;
-      const text = msg.text || '';
+  const { bot, commandHandler, exchangeHandler } = initialize();
 
-      // Commands
-      if (text === '/start') {
-        return await commandHandler.handleStart(msg);
-      }
-      if (text === '/currencies') {
-        return await commandHandler.handleCurrencies(msg);
-      }
-      if (text === '/myorders') {
-        return await commandHandler.handleMyOrders(msg);
-      }
-      if (text === '/help') {
-        return await commandHandler.handleHelp(msg);
-      }
-      if (text === '/exchange') {
-        return await exchangeHandler.startExchange(msg);
-      }
-      if (text.startsWith('/check_')) {
-        const orderId = text.split('_')[1];
-        return await exchangeHandler.checkOrder(msg, orderId);
-      }
+  if (update.callback_query) {
+    const query = update.callback_query;
+    const chatId = query.message.chat.id;
+    const fakeMsg = { chat: { id: chatId }, from: query.from };
 
-      // Exchange flow messages
-      const userId = msg.from.id;
-      const session = exchangeHandler.sessions.get(userId);
+    await bot.answerCallbackQuery(query.id);
 
-      if (session) {
-        if (session.step === 'awaiting_amount') {
-          return await exchangeHandler.handleAmount(msg);
-        }
-        if (session.step === 'awaiting_address') {
-          return await exchangeHandler.handleAddress(msg);
-        }
-        if (session.step === 'awaiting_tag') {
-          return await exchangeHandler.handleTag(msg);
-        }
+    if (query.data === 'start_exchange') {
+      await exchangeHandler.startExchange(fakeMsg);
+    } else if (query.data === 'show_currencies') {
+      await commandHandler.handleCurrencies(fakeMsg);
+    } else if (query.data === 'my_orders') {
+      await commandHandler.handleMyOrders(fakeMsg);
+    } else if (query.data === 'show_help') {
+      await commandHandler.handleHelp(fakeMsg);
+    } else if (query.data === 'back_to_menu') {
+      await commandHandler.handleStart(fakeMsg);
+    } else {
+      await exchangeHandler.handleCallback(query);
+    }
+    return;
+  }
+
+  if (update.message) {
+    const msg = update.message;
+
+    if (msg.text && msg.text.startsWith('/')) {
+      const command = msg.text.split(' ')[0].split('@')[0];
+
+      if (command === '/start') {
+        await commandHandler.handleStart(msg);
+      } else if (command === '/currencies') {
+        await commandHandler.handleCurrencies(msg);
+      } else if (command === '/myorders') {
+        await commandHandler.handleMyOrders(msg);
+      } else if (command === '/help') {
+        await commandHandler.handleHelp(msg);
+      } else if (command === '/exchange') {
+        await exchangeHandler.startExchange(msg);
+      } else if (command.startsWith('/check_')) {
+        const orderId = command.replace('/check_', '');
+        await commandHandler.handleCheckOrder(msg, orderId);
       }
+      return;
     }
 
-    if (update.callback_query) {
-      const query = update.callback_query;
-      const data = query.data;
+    const userId = msg.from.id;
+    const session = exchangeHandler.sessions.get(userId);
 
-      // دکمه‌های منوی اصلی
-      if (data === 'start_exchange') {
-        await bot.answerCallbackQuery(query.id);
-        return await exchangeHandler.startExchange(query.message);
+    if (session) {
+      if (session.stage === 'awaiting_amount') {
+        await exchangeHandler.handleAmountInput(msg);
+      } else if (session.stage === 'awaiting_address') {
+        await exchangeHandler.handleAddressInput(msg);
+      } else if (session.stage === 'awaiting_tag') {
+        await exchangeHandler.handleTagInput(msg);
       }
-      if (data === 'show_currencies') {
-        await bot.answerCallbackQuery(query.id);
-        return await commandHandler.handleCurrencies(query.message);
-      }
-      if (data === 'my_orders') {
-        await bot.answerCallbackQuery(query.id);
-        return await commandHandler.handleMyOrders(query.message);
-      }
-      if (data === 'show_help') {
-        await bot.answerCallbackQuery(query.id);
-        return await commandHandler.handleHelp(query.message);
-      }
-      if (data === 'back_to_menu') {
-        await bot.answerCallbackQuery(query.id);
-        return await commandHandler.handleStart(query.message);
-      }
-
-      // Exchange callbacks
-      return await exchangeHandler.handleCallback(query);
     }
-  } catch (error) {
-    console.error('Error handling update:', error);
   }
 }
 
 module.exports = async (req, res) => {
-  if (req.method !== 'POST') {
-    return res.status(200).send('OK');
-  }
-
-  try {
-    initialize();
-    await handleUpdate(req.body);
-    res.status(200).send('OK');
-  } catch (error) {
-    console.error('Webhook error:', error);
-    res.status(500).send('Error');
+  if (req.method === 'POST') {
+    try {
+      await handleUpdate(req.body);
+      res.status(200).json({ ok: true });
+    } catch (error) {
+      console.error('Error handling update:', error);
+      res.status(200).json({ ok: true });
+    }
+  } else {
+    res.status(200).json({ status: 'Bot is running' });
   }
 };
