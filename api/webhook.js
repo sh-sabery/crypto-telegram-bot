@@ -76,13 +76,13 @@ async function handleUpdate(update) {
     const userId = msg.from.id;
     const session = exchangeHandler.sessions.get(userId);
 
-    if (session) {
-      if (session.stage === 'awaiting_amount') {
-        await exchangeHandler.handleAmountInput(msg);
-      } else if (session.stage === 'awaiting_address') {
-        await exchangeHandler.handleAddressInput(msg);
-      } else if (session.stage === 'awaiting_tag') {
-        await exchangeHandler.handleTagInput(msg);
+      if (session) {
+        if (session.step === 'enter_amount') {
+        await exchangeHandler.handleAmount(msg);
+      } else if (session.step === 'enter_address') {
+        await exchangeHandler.handleAddress(msg);
+      } else if (session.step === 'enter_tag') {
+        await exchangeHandler.handleTag(msg);
       }
     }
   }
