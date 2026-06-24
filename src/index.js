@@ -47,7 +47,6 @@ bot.on('callback_query', async (query) => {
   // دکمه‌های منوی اصلی
   if (data === 'start_exchange') {
     await bot.answerCallbackQuery(query.id);
-    // ساخت یک message object با chat id درست
     const fakeMsg = { chat: { id: chatId }, from: query.from };
     return exchangeHandler.startExchange(fakeMsg);
   }
@@ -84,17 +83,20 @@ bot.on('callback_query', async (query) => {
 bot.on('message', async (msg) => {
   // Skip اگر command است
   if (msg.text && msg.text.startsWith('/')) return;
+  
+  // Skip اگر text ندارد (عکس، فایل و...)
+  if (!msg.text) return;
 
   const userId = msg.from.id;
   const session = exchangeHandler.sessions.get(userId);
 
   if (!session) return;
 
-  if (session.step === 'awaiting_amount') {
+  if (session.step === 'enter_amount') {
     await exchangeHandler.handleAmount(msg);
-  } else if (session.step === 'awaiting_address') {
+  } else if (session.step === 'enter_address') {
     await exchangeHandler.handleAddress(msg);
-  } else if (session.step === 'awaiting_tag') {
+  } else if (session.step === 'enter_tag') {
     await exchangeHandler.handleTag(msg);
   }
 });
