@@ -19,7 +19,7 @@ class ExchangeHandler {
         currencies: currencies
       });
 
-      const keyboard = this.createCurrencyKeyboard(sendable);
+      const keyboard = this.createCurrencyKeyboard(sendable, 'from');
       
       await this.bot.sendMessage(
         userId,
@@ -46,9 +46,27 @@ class ExchangeHandler {
 
     try {
       if (data.startsWith('from_')) {
-        await this.handleFromCurrency(userId, query, data.substring(5));
+        const currencyData = data.substring(5);
+        if (currencyData.endsWith('_multi')) {
+          await this.showNetworkSelection(userId, query, currencyData.replace('_multi', ''), 'from');
+        } else {
+          await this.handleFromCurrency(userId, query, currencyData);
+        }
       } else if (data.startsWith('to_')) {
-        await this.handleToCurrency(userId, query, data.substring(3));
+        const currencyData = data.substring(3);
+        if (currencyData.endsWith('_multi')) {
+          await this.showNetworkSelection(userId, query, currencyData.replace('_multi', ''), 'to');
+        } else {
+          await this.handleToCurrency(userId, query, currencyData);
+        }
+      } else if (data.startsWith('net_from_')) {
+        await this.handleFromCurrency(userId, query, data.substring(9));
+      } else if (data.startsWith('net_to_')) {
+        await this.handleToCurrency(userId, query, data.substring(7));
+      } else if (data === 'back_from_network') {
+        await this.backToCurrencySelection(userId, query, 'from');
+      } else if (data === 'back_to_network') {
+        await this.backToCurrencySelection(userId, query, 'to');
       } else if (data.startsWith('type_')) {
         await this.handleType(userId, query, data.substring(5));
       } else if (data.startsWith('dir_')) {
@@ -63,16 +81,101 @@ class ExchangeHandler {
     }
   }
 
-  async handleFromCurrency(userId, query, currencyCode) {
+  async showNetworkSelection(userId, query, coin, prefix) {
     const session = this.sessions.get(userId);
-    session.fromCcy = currencyCode;
+    const networks = session.currencies.filter(c => c.coin === coin);
+
+    if (prefix === 'from') {
+      networks.filter(c => c.recv);
+    } else {
+      networks.filter(c => c.send);
+    }
+
+    const buttons = networks.map(net => [{
+      text: `${net.network}${net.send ? ' ✅' : ' ❌'}`,
+      callback_data: `net_${prefix}_${coin}_${net.network}`
+    }]);
+
+    buttons.push([
+      { text: '🔙 بازگشت', callback_data: `back_${prefix}_network` }
+    ]);
+
+    const coinName = networks[0].name;
+    const stepText = prefix === 'from' ? '1️⃣ ارز مبدا' : '2️⃣ ارز مقصد';
+
+    await this.bot.editMessageText(
+      `${stepText}: *${coinName}*\n\n🌐 *شبکه را انتخاب کنید:*\n\n✅ = قابل ارسال/دریافت\n❌ = غیرفعال`,
+      {
+        chat_id: userId,
+        message_id: query.message.message_id,
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: buttons }
+      }
+    );
+
+    await this.bot.answerCallbackQuery(query.id);
+  }
+
+  async backToCurrencySelection(userId, query, prefix) {
+    const session = this.sessions.get(userId);
+    
+    if (prefix === 'from') {
+      const sendable = session.currencies.filter(c => c.recv);
+      const keyboard = this.createCurrencyKeyboard(sendable, 'from');
+      
+      await this.bot.editMessageText(
+        '1️⃣ *ارز مبدا را انتخاب کنید:*\n(ارزی که می‌خواهید بفرستید)',
+        {
+          chat_id: userId,
+          message_id: query.message.message_id,
+          parse_mode: 'Markdown',
+          reply_markup: keyboard
+        }
+      );
+    } else {
+      const receivable = session.currencies.filter(c => c.send && c.code !== session.fromCode);
+      const keyboard = this.createCurrencyKeyboard(receivable, 'to');
+      
+      await this.bot.editMessageText(
+        `✅ ارز مبدا: *${session.fromName}* (${session.fromNetwork})\n\n2️⃣ *ارز مقصد را انتخاب کنید:*\n(ارزی که می‌خواهید دریافت کنید)`,
+        {
+          chat_id: userId,
+          message_id: query.message.message_id,
+          parse_mode: 'Markdown',
+          reply_markup: keyboard
+        }
+      );
+    }
+
+    await this.bot.answerCallbackQuery(query.id);
+  }
+
+  async handleFromCurrency(userId, query, currencyData) {
+    const session = this.sessions.get(userId);
+    const [coin, network] = currencyData.split('_');
+    
+    const currency = session.currencies.find(c => c.coin === coin && c.network === network);
+    if (!currency) {
+      await this.bot.answerCallbackQuery(query.id, { text: 'ارز پیدا نشد' });
+      return;
+    }
+
+    if (!currency.recv) {
+      await this.bot.answerCallbackQuery(query.id, { text: '❌ این ارز فعلاً قابل ارسال نیست', show_alert: true });
+      return;
+    }
+
+    session.fromCoin = coin;
+    session.fromNetwork = network;
+    session.fromCode = currency.code;
+    session.fromName = currency.name;
     session.step = 'select_to';
 
-    const receivable = session.currencies.filter(c => c.send && c.code !== currencyCode);
+    const receivable = session.currencies.filter(c => c.send && c.code !== currency.code);
     const keyboard = this.createCurrencyKeyboard(receivable, 'to');
 
     await this.bot.editMessageText(
-      `✅ ارز مبدا: *${currencyCode}*\n\n2️⃣ *ارز مقصد را انتخاب کنید:*\n(ارزی که می‌خواهید دریافت کنید)`,
+      `✅ ارز مبدا: *${currency.name}* (${currency.network})\n\n2️⃣ *ارز مقصد را انتخاب کنید:*\n(ارزی که می‌خواهید دریافت کنید)`,
       {
         chat_id: userId,
         message_id: query.message.message_id,
@@ -84,9 +187,25 @@ class ExchangeHandler {
     await this.bot.answerCallbackQuery(query.id);
   }
 
-  async handleToCurrency(userId, query, currencyCode) {
+  async handleToCurrency(userId, query, currencyData) {
     const session = this.sessions.get(userId);
-    session.toCcy = currencyCode;
+    const [coin, network] = currencyData.split('_');
+    
+    const currency = session.currencies.find(c => c.coin === coin && c.network === network);
+    if (!currency) {
+      await this.bot.answerCallbackQuery(query.id, { text: 'ارز پیدا نشد' });
+      return;
+    }
+
+    if (!currency.send) {
+      await this.bot.answerCallbackQuery(query.id, { text: '❌ این ارز فعلاً قابل دریافت نیست', show_alert: true });
+      return;
+    }
+
+    session.toCoin = coin;
+    session.toNetwork = network;
+    session.toCode = currency.code;
+    session.toName = currency.name;
     session.step = 'select_type';
 
     const keyboard = {
@@ -99,7 +218,7 @@ class ExchangeHandler {
     };
 
     await this.bot.editMessageText(
-      `✅ ارز مبدا: *${session.fromCcy}*\n✅ ارز مقصد: *${currencyCode}*\n\n3️⃣ *نوع نرخ را انتخاب کنید:*\n\n📊 نرخ شناور: بهترین نرخ بازار\n🔒 نرخ ثابت: نرخ قطعی`,
+      `✅ ارز مبدا: *${session.fromName}* (${session.fromNetwork})\n✅ ارز مقصد: *${currency.name}* (${currency.network})\n\n3️⃣ *نوع نرخ را انتخاب کنید:*\n\n📊 نرخ شناور: بهترین نرخ بازار\n🔒 نرخ ثابت: نرخ قطعی`,
       {
         chat_id: userId,
         message_id: query.message.message_id,
@@ -119,8 +238,8 @@ class ExchangeHandler {
     const keyboard = {
       inline_keyboard: [
         [
-          { text: `📤 می‌فرستم (${session.fromCcy})`, callback_data: 'dir_from' },
-          { text: `📥 دریافت می‌کنم (${session.toCcy})`, callback_data: 'dir_to' }
+          { text: `📤 می‌فرستم (${session.fromCode})`, callback_data: 'dir_from' },
+          { text: `📥 دریافت می‌کنم (${session.toCode})`, callback_data: 'dir_to' }
         ]
       ]
     };
@@ -145,7 +264,7 @@ class ExchangeHandler {
     session.direction = direction;
     session.step = 'enter_amount';
 
-    const currencyName = direction === 'from' ? session.fromCcy : session.toCcy;
+    const currencyName = direction === 'from' ? session.fromCode : session.toCode;
 
     await this.bot.editMessageText(
       `5️⃣ *مقدار ${currencyName} را وارد کنید:*`,
@@ -180,8 +299,8 @@ class ExchangeHandler {
       await this.bot.sendMessage(userId, '⏳ در حال محاسبه نرخ...');
 
       const priceData = await this.api.getPrice({
-        fromCcy: session.fromCcy,
-        toCcy: session.toCcy,
+        fromCcy: session.fromCode,
+        toCcy: session.toCode,
         amount: amount,
         direction: session.direction,
         type: session.type
@@ -205,7 +324,7 @@ class ExchangeHandler {
 💵 ارزش تقریبی: $${priceData.from.usd.toFixed(2)}
 📈 نرخ: ${priceData.from.rate.toFixed(8)}
 
-6️⃣ *آدرس کیف پول ${session.toCcy} خود را وارد کنید:*
+6️⃣ *آدرس کیف پول ${session.toCode} (${session.toNetwork}) خود را وارد کنید:*
       `;
 
       await this.bot.sendMessage(userId, summary, { parse_mode: 'Markdown' });
@@ -232,8 +351,7 @@ class ExchangeHandler {
 
     session.toAddress = address;
 
-    // چک کردن اینکه آیا این ارز نیاز به tag/memo داره
-    const toCurrency = session.currencies.find(c => c.code === session.toCcy);
+    const toCurrency = session.currencies.find(c => c.code === session.toCode);
     
     if (toCurrency && toCurrency.tag) {
       session.step = 'enter_tag';
@@ -271,8 +389,8 @@ class ExchangeHandler {
     let confirmText = `
 ✅ *تایید نهایی سفارش*
 
-📤 ارسال: \`${pd.from.amount}\` ${pd.from.code}
-📥 دریافت: \`${pd.to.amount}\` ${pd.to.code}
+📤 ارسال: \`${pd.from.amount}\` ${pd.from.code} (${session.fromNetwork})
+📥 دریافت: \`${pd.to.amount}\` ${pd.to.code} (${session.toNetwork})
 💵 ارزش: $${pd.from.usd.toFixed(2)}
 
 📮 آدرس مقصد:
@@ -283,7 +401,7 @@ class ExchangeHandler {
       confirmText += `\n🏷 Tag/Memo: \`${session.tag}\``;
     }
 
-    confirmText += `\n\n⚠️ *توجه:* سرویس تبادل توسط FixedFloat ارائه می‌شود. با ایجاد سفارش، قوانین FixedFloat را می‌پذیرید.`;
+    confirmText += `\n\n⚠️ *توجه:* با ایجاد سفارش، قوانین را می‌پذیرید.`;
 
     const keyboard = {
       inline_keyboard: [
@@ -315,8 +433,8 @@ class ExchangeHandler {
       );
 
       const orderData = await this.api.createOrder({
-        fromCcy: session.fromCcy,
-        toCcy: session.toCcy,
+        fromCcy: session.fromCode,
+        toCcy: session.toCode,
         amount: session.amount,
         direction: session.direction,
         toAddress: session.toAddress,
@@ -324,7 +442,6 @@ class ExchangeHandler {
         tag: session.tag
       });
 
-      // ذخیره سفارش
       userStore.saveOrder(userId, orderData);
       userStore.incrementOrderCount(userId);
 
@@ -355,7 +472,6 @@ ${orderData.from.tag ? `\n🏷 ${orderData.from.tagName}: \`${orderData.from.tag
         parse_mode: 'Markdown'
       });
 
-      // پاک کردن session
       this.sessions.delete(userId);
 
     } catch (error) {
@@ -399,7 +515,6 @@ ${orderData.from.tag ? `\n🏷 ${orderData.from.tagName}: \`${orderData.from.tag
 
       const updatedOrder = await this.api.getOrder(order.id, order.token);
 
-      // آپدیت سفارش در دیتابیس
       userStore.saveOrder(userId, updatedOrder);
 
       let statusText = `
@@ -459,20 +574,47 @@ ${orderData.from.tag ? `\n🏷 ${orderData.from.tagName}: \`${orderData.from.tag
 
   createCurrencyKeyboard(currencies, prefix = 'from') {
     const buttons = [];
-    const perRow = 3;
+    const perRow = 2;
 
-    // گروه‌بندی محبوب‌ترین ارزها
-    const popular = ['BTC', 'ETH', 'USDT', 'BNB', 'USDC'];
-    const popularCurrencies = currencies.filter(c => popular.includes(c.coin));
-    const otherCurrencies = currencies.filter(c => !popular.includes(c.coin));
+    // گروه‌بندی بر اساس coin
+    const grouped = new Map();
+    for (const c of currencies) {
+      if (!grouped.has(c.coin)) {
+        grouped.set(c.coin, []);
+      }
+      grouped.get(c.coin).push(c);
+    }
 
-    const allCurrencies = [...popularCurrencies, ...otherCurrencies];
+    // محبوب‌ترین ارزها
+    const popular = ['BTC', 'ETH', 'USDT', 'BNB', 'USDC', 'TRX', 'XRP', 'LTC', 'DOGE', 'ADA'];
+    const popularCoins = popular.filter(coin => grouped.has(coin));
+    const otherCoins = Array.from(grouped.keys()).filter(coin => !popular.includes(coin)).sort();
 
-    for (let i = 0; i < allCurrencies.length; i += perRow) {
-      const row = allCurrencies.slice(i, i + perRow).map(c => ({
-        text: `${c.code}`,
-        callback_data: `${prefix}_${c.code}`
-      }));
+    const allCoins = [...popularCoins, ...otherCoins];
+
+    for (let i = 0; i < allCoins.length; i += perRow) {
+      const row = allCoins.slice(i, i + perRow).map(coin => {
+        const networks = grouped.get(coin);
+        const firstNetwork = networks[0];
+        
+        // اگر فقط یک شبکه داره
+        if (networks.length === 1) {
+          const status = prefix === 'from' ? 
+            (firstNetwork.recv ? '' : ' ❌') : 
+            (firstNetwork.send ? '' : ' ❌');
+          
+          return {
+            text: `${firstNetwork.name}${status}`,
+            callback_data: `${prefix}_${coin}_${firstNetwork.network}`
+          };
+        }
+        
+        // اگر چند شبکه داره
+        return {
+          text: `${firstNetwork.name} (${networks.length} شبکه)`,
+          callback_data: `${prefix}_${coin}_multi`
+        };
+      });
       buttons.push(row);
     }
 
