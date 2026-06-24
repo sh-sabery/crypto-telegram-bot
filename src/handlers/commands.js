@@ -31,71 +31,84 @@ class CommandHandler {
   }
 
   async handleCurrencies(msg) {
-    try {
-      const currencies = await this.fixedFloat.getCurrencies();
-      
-      // دسته‌بندی ارزها
-      const both = [];      // ارسال ✅ دریافت ✅
-      const sendOnly = [];  // ارسال ✅ دریافت ❌
-      const recvOnly = [];  // ارسال ❌ دریافت ✅
-      const inactive = [];  // ارسال ❌ دریافت ❌
-      
-      currencies.forEach(coin => {
-        const code = coin.code.toUpperCase();
-        const network = coin.network ? ` (${coin.network})` : '';
-        const display = `${code}${network}`;
-        
-        if (coin.send && coin.recv) {
-          both.push(display);
-        } else if (coin.send && !coin.recv) {
-          sendOnly.push(display);
-        } else if (!coin.send && coin.recv) {
-          recvOnly.push(display);
-        } else {
-          inactive.push(display);
-        }
-      });
-      
-      // ساخت پیام
-      let message = '💰 *لیست ارزهای موجود:*\n\n';
-      
-      if (both.length > 0) {
-        message += '✅ *ارزهای فعال (ارسال و دریافت):*\n';
-        message += both.join(' • ') + '\n\n';
-      }
-      
-      if (sendOnly.length > 0) {
-        message += '📤 *فقط ارسال:*\n';
-        message += sendOnly.join(' • ') + '\n\n';
-      }
-      
-      if (recvOnly.length > 0) {
-        message += '📥 *فقط دریافت:*\n';
-        message += recvOnly.join(' • ') + '\n\n';
-      }
-      
-      if (inactive.length > 0) {
-        message += '⏸ *غیرفعال:*\n';
-        message += inactive.join(' • ') + '\n\n';
-      }
-      
-      // تقسیم پیام‌های بلند
-      const messages = this.splitMessage(message);
-      for (const msg_text of messages) {
-        await this.bot.sendMessage(msg.chat.id, msg_text, { parse_mode: 'Markdown' });
-      }
-      
-      // دکمه بازگشت
-      await this.bot.sendMessage(msg.chat.id, 'برای بازگشت:', {
-        reply_markup: {
-          inline_keyboard: [[{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_to_menu' }]]
-        }
-      });
-    } catch (error) {
-      console.error('Error in handleCurrencies:', error);
-      await this.bot.sendMessage(msg.chat.id, '❌ خطا در دریافت لیست ارزها');
+  const chatId = msg.chat.id;
+
+  try {
+    const currencies = await this.fixedFloat.getCurrencies();
+
+    const both = [];
+    const sendOnly = [];
+    const recvOnly = [];
+    const inactive = [];
+
+    for (const currency of currencies) {
+      const send = currency.send === true || currency.send === 1;
+      const recv = currency.recv === true || currency.recv === 1;
+      const network = currency.network || '';
+      const code = currency.code || currency.coin || '';
+
+      const item = { code, network, send, recv };
+
+      if (send && recv) both.push(item);
+      else if (send) sendOnly.push(item);
+      else if (recv) recvOnly.push(item);
+      else inactive.push(item);
     }
+
+    // گروه‌بندی ارزهای فعال بر اساس شبکه
+    const groupByNetwork = (list) => {
+      const groups = {};
+      for (const item of list) {
+        const net = item.network || 'سایر';
+        if (!groups[net]) groups[net] = [];
+        groups[net].push(item.code);
+      }
+      return groups;
+    };
+
+    const formatGrouped = (list) => {
+      const groups = groupByNetwork(list);
+      return Object.keys(groups)
+        .sort()
+        .map((net) => `  ${net}: ${groups[net].join(', ')}`)
+        .join('\n');
+    };
+
+    const formatFlat = (list) =>
+      list.map((i) => i.code).join(' • ');
+
+    let message = '💰 لیست ارزهای موجود:\n';
+
+    if (both.length) {
+      message += `\n✅ ارزهای فعال (ارسال و دریافت):\n${formatGrouped(both)}\n`;
+    }
+    if (sendOnly.length) {
+      message += `\n📤 فقط ارسال:\n${formatFlat(sendOnly)}\n`;
+    }
+    if (recvOnly.length) {
+      message += `\n📥 فقط دریافت:\n${formatFlat(recvOnly)}\n`;
+    }
+    if (inactive.length) {
+      message += `\n⏸ غیرفعال:\n${formatFlat(inactive)}\n`;
+    }
+
+    const parts = this.splitMessage(message);
+    for (const part of parts) {
+      await this.bot.sendMessage(chatId, part);
+    }
+
+    await this.bot.sendMessage(chatId, 'برای بازگشت:', {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_to_menu' }],
+        ],
+      },
+    });
+  } catch (error) {
+    console.error('Error in handleCurrencies:', error);
+    await this.bot.sendMessage(chatId, '❌ خطا در دریافت لیست ارزها.');
   }
+}
 
   async handleMyOrders(msg) {
     const chatId = msg.chat.id;
