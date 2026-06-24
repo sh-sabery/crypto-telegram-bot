@@ -111,11 +111,8 @@ class CommandHandler {
 - برای برخی ارزها (XRP, XLM) نیاز به Memo/Tag است
 
 *🔒 امنیت:*
-سرویس مبادله توسط FixedFloat ارائه می‌شود.
 ربات هیچ دسترسی به کیف پول شما ندارد.
 
-*📞 پشتیبانی:*
-در صورت بروز مشکل با پشتیبانی FixedFloat تماس بگیرید.
     `;
 
     await this.bot.sendMessage(userId, helpText, { parse_mode: 'Markdown' });
