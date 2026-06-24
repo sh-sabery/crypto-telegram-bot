@@ -31,56 +31,69 @@ class CommandHandler {
   }
 
   async handleCurrencies(msg) {
-    const chatId = msg.chat.id;
-    
     try {
-      await this.bot.sendMessage(chatId, '⏳ در حال دریافت لیست ارزها...');
-      
       const currencies = await this.fixedFloat.getCurrencies();
       
-      const grouped = {};
-      currencies.forEach(currency => {
-        const network = currency.network || 'سایر';
-        if (!grouped[network]) {
-          grouped[network] = [];
-        }
-        grouped[network].push(currency);
-      });
-
-      let message = '💰 لیست ارزهای موجود:\n\n';
+      // دسته‌بندی ارزها
+      const both = [];      // ارسال ✅ دریافت ✅
+      const sendOnly = [];  // ارسال ✅ دریافت ❌
+      const recvOnly = [];  // ارسال ❌ دریافت ✅
+      const inactive = [];  // ارسال ❌ دریافت ❌
       
-      for (const [network, coins] of Object.entries(grouped)) {
-        message += `🔸 ${network}:\n`;
-        coins.forEach(coin => {
-          const send = coin.send ? '✅' : '❌';
-          const recv = coin.recv ? '✅' : '❌';
-          message += `  • ${coin.code.toUpperCase()} - ${coin.coin}\n`;
-          message += `    ارسال: ${send} | دریافت: ${recv}\n`;
-        });
-        message += '\n';
-      }
-
-      const messages = this.splitMessage(message);
-      for (const msg of messages) {
-        await this.bot.sendMessage(chatId, msg);
-      }
-
-      const keyboard = {
-        inline_keyboard: [
-          [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_to_menu' }]
-        ]
-      };
-
-      await this.bot.sendMessage(chatId, '✅ لیست ارزها دریافت شد.', {
-        reply_markup: keyboard
+      currencies.forEach(coin => {
+        const code = coin.code.toUpperCase();
+        const network = coin.network ? ` (${coin.network})` : '';
+        const display = `${code}${network}`;
+        
+        if (coin.send && coin.recv) {
+          both.push(display);
+        } else if (coin.send && !coin.recv) {
+          sendOnly.push(display);
+        } else if (!coin.send && coin.recv) {
+          recvOnly.push(display);
+        } else {
+          inactive.push(display);
+        }
       });
-
+      
+      // ساخت پیام
+      let message = '💰 *لیست ارزهای موجود:*\n\n';
+      
+      if (both.length > 0) {
+        message += '✅ *ارزهای فعال (ارسال و دریافت):*\n';
+        message += both.join(' • ') + '\n\n';
+      }
+      
+      if (sendOnly.length > 0) {
+        message += '📤 *فقط ارسال:*\n';
+        message += sendOnly.join(' • ') + '\n\n';
+      }
+      
+      if (recvOnly.length > 0) {
+        message += '📥 *فقط دریافت:*\n';
+        message += recvOnly.join(' • ') + '\n\n';
+      }
+      
+      if (inactive.length > 0) {
+        message += '⏸ *غیرفعال:*\n';
+        message += inactive.join(' • ') + '\n\n';
+      }
+      
+      // تقسیم پیام‌های بلند
+      const messages = this.splitMessage(message);
+      for (const msg_text of messages) {
+        await this.bot.sendMessage(msg.chat.id, msg_text, { parse_mode: 'Markdown' });
+      }
+      
+      // دکمه بازگشت
+      await this.bot.sendMessage(msg.chat.id, 'برای بازگشت:', {
+        reply_markup: {
+          inline_keyboard: [[{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_to_menu' }]]
+        }
+      });
     } catch (error) {
-      console.error('Error fetching currencies:', error);
-      await this.bot.sendMessage(
-        chatId,
-        '❌ خطا در دریافت لیست ارزها. لطفاً بعداً تلاش کنید.'
-      );
+      console.error('Error in handleCurrencies:', error);
+      await this.bot.sendMessage(msg.chat.id, '❌ خطا در دریافت لیست ارزها');
     }
   }
 
