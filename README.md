@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Crypto Telegram Bot
 
 ربات تلگرام برای تبادل ارزهای دیجیتال با استفاده از FixedFloat API.
@@ -159,3 +160,7 @@ MIT
 ## پشتیبانی
 
 برای مشکلات مربوط به API، با [FixedFloat Support](https://fixedfloat.com) تماس بگیرید.
+=======
+# crypto-telegram-bot
+ربات تلگرام برای تبادل ارزهای دیجیتال با استفاده از FixedFloat API.
+>>>>>>> origin/main
